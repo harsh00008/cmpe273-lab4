@@ -172,10 +172,7 @@ public class CRDTClient implements CacheServiceInterface {
                 }
             }
         }
-
-        System.out.println("Server " + serverMessage);
         return serverMessage;
-
     }
 
     /**
