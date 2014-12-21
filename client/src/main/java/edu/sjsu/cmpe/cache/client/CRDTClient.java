@@ -186,7 +186,7 @@ public class CRDTClient implements CacheServiceInterface {
     public void put(long key, String value) {
 
         doneLatch = new CountDownLatch(3);
-
+        System.out.println("Value : " + value);
         Future<HttpResponse<JsonNode>> server1 = Unirest
                 .put("http://localhost:3000/cache/{key}/{value}")
                 .header("accept", "application/json")
@@ -233,7 +233,6 @@ public class CRDTClient implements CacheServiceInterface {
                     }
 
                     public void cancelled() {
-
                         System.out.println("The request has been cancelled");
                     }
 
@@ -292,6 +291,7 @@ public class CRDTClient implements CacheServiceInterface {
         }
         isServer1Complete = isServer2Complete = isServer3Complete = false;
         successCount = 0;
+        server1 = server2 = server3 = null;
     }
 
 
