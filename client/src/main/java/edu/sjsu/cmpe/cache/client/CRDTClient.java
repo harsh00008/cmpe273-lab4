@@ -9,8 +9,12 @@ import com.mashape.unirest.http.async.Callback;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Iterator;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.lang.Integer;
 
 /**
  * Distributed cache service
@@ -23,7 +27,7 @@ public class CRDTClient implements CacheServiceInterface {
     private boolean isServer2Complete = false;
     private boolean isServer3Complete = false;
 
-    private String serverMessage = "";
+    private HashMap<String, String> serverMessage;
 
     private String server1Message="";
     private String server2Message="";
@@ -36,6 +40,10 @@ public class CRDTClient implements CacheServiceInterface {
 
     public CRDTClient() {
         doneLatch = new CountDownLatch(3);
+        serverMessage = new HashMap<String, String>();
+        serverMessage.put("serverA", "");
+        serverMessage.put("serverB", "");
+        serverMessage.put("serverC", "");
     }
 
     /**
@@ -58,9 +66,7 @@ public class CRDTClient implements CacheServiceInterface {
                         public void completed(HttpResponse<JsonNode> response) {
                             successCount++;
                             server1Message = response.getBody().getObject().getString("value").toString();
-                            if(!server1Message.equals("")){
-                                serverMessage = server1Message;
-                            }
+                            serverMessage.put("serverA", server1Message);
                             doneLatch.countDown();
                         }
 
@@ -84,9 +90,7 @@ public class CRDTClient implements CacheServiceInterface {
 
                         public void completed(HttpResponse<JsonNode> response) {
                             server2Message = response.getBody().getObject().getString("value").toString();
-                            if(!server2Message.equals("")){
-                                serverMessage = server2Message;
-                            }
+                            serverMessage.put("serverB", server2Message);
                             doneLatch.countDown();
                         }
 
@@ -111,9 +115,7 @@ public class CRDTClient implements CacheServiceInterface {
 
                         public void completed(HttpResponse<JsonNode> response) {
                             server3Message = response.getBody().getObject().getString("value").toString();
-                            if(!server3Message.equals("")){
-                                serverMessage = server3Message;
-                            }
+                            serverMessage.put("serverC", server3Message);
                             doneLatch.countDown();
                         }
 
@@ -129,50 +131,54 @@ public class CRDTClient implements CacheServiceInterface {
         }catch(InterruptedException e){
 
         }
-        if(!serverMessage.equals("")){
-            HttpResponse<JsonNode> response = null;
-            if(server1Message.isEmpty()){
-                System.out.println("Repairing server http://localhost:3000/cache/ with {"+key+", "+server2Message+"}");
-                try {
-                    response = Unirest
-                            .put("http://localhost:3000/cache/{key}/{value}")
-                            .header("accept", "application/json")
-                            .routeParam("key", Long.toString(key))
-                            .routeParam("value", serverMessage).asJson();
-                } catch (UnirestException e) {
-                    System.err.println(e);
-                }
 
+        int countA = getFrequencyByValue(serverMessage, server1Message);
+        int countB = getFrequencyByValue(serverMessage, server2Message);
+        int countC = getFrequencyByValue(serverMessage, server3Message);
 
-            }
-            if(server2Message.equals("")){
-                System.out.println("Repairing server http://localhost:3001/cache with {"+key+", "+server1Message+"}");
-                try {
-                    response = Unirest
-                            .put("http://localhost:3001/cache/{key}/{value}")
-                            .header("accept", "application/json")
-                            .routeParam("key", Long.toString(key))
-                            .routeParam("value", serverMessage).asJson();
-                } catch (UnirestException e) {
-                    System.err.println(e);
-                }
+        String finalReply = "";
 
+        if(countA >= 2){ finalReply = server1Message; }
+        if(countB >= 2){ finalReply = server2Message; }
+        if(countC >= 2){ finalReply = server3Message; }
 
-            }
-            if(server3Message.isEmpty()){
-                System.out.println("Repairing server http://localhost:3002/ with {"+key+", "+server1Message+"}");
-                try {
-                    response = Unirest
-                            .put("http://localhost:3002/cache/{key}/{value}")
-                            .header("accept", "application/json")
-                            .routeParam("key", Long.toString(key))
-                            .routeParam("value", serverMessage).asJson();
-                } catch (UnirestException e) {
-                    System.err.println(e);
-                }
+        if(countA == 1 ){
+            finalReply = serverMessage.get("serverB");
+            makeRepairCall("http://localhost:3000", key, finalReply);
+        }else if(countB == 1){
+            finalReply = serverMessage.get("serverC");
+            makeRepairCall("http://localhost:3001",key,finalReply);
+        }else if(countC == 1 ){
+            finalReply = serverMessage.get("serverA");
+            makeRepairCall("http://localhost:3002",key,finalReply);
+        }
+        return finalReply;
+    }
+
+    //get frequency of messages for majority vote
+    private int getFrequencyByValue(HashMap<String, String> map, String value){
+        int count = 0;
+        for(Map.Entry<String, String> entry : map.entrySet()){
+            if( entry.getValue().equals(value) ){
+                count++;
             }
         }
-        return serverMessage;
+        return count;
+    }
+
+    //Make Repair Call
+    private void makeRepairCall(String url, long key, String value){
+        HttpResponse<JsonNode> response = null;
+        System.out.println("Repairing server "+ url +"/cache with {"+key+", "+value+"}");
+        try {
+            response = Unirest
+                    .put(url + "/cache/{key}/{value}")
+                    .header("accept", "application/json")
+                    .routeParam("key", Long.toString(key))
+                    .routeParam("value", value).asJson();
+        } catch (UnirestException e) {
+            System.err.println(e);
+        }
     }
 
     /**
@@ -264,7 +270,6 @@ public class CRDTClient implements CacheServiceInterface {
         }catch(InterruptedException e){
 
         }
-        System.out.println("Success Count" + successCount);
         if(successCount < 2){
             HttpResponse<JsonNode> response;
             try{
